@@ -6,6 +6,7 @@ A forked version of io.micrometer:micrometer-registry-dynatrace with some fixes
 
 Includes
 * https://github.com/micrometer-metrics/micrometer/pull/1072
+* https://github.com/micrometer-metrics/micrometer/issues/1104
 
 ## Sample
 
