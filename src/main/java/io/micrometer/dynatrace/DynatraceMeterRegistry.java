@@ -27,6 +27,7 @@ import io.micrometer.core.lang.Nullable;
 import org.slf4j.Logger;
 import org.slf4j.LoggerFactory;
 
+import java.util.ArrayList;
 import java.util.List;
 import java.util.Map;
 import java.util.Set;
@@ -39,7 +40,6 @@ import java.util.stream.StreamSupport;
 
 import static io.micrometer.dynatrace.DynatraceMetricDefinition.DynatraceUnit;
 import static java.util.Objects.requireNonNull;
-import static java.util.stream.Collectors.joining;
 
 /**
  * {@link StepMeterRegistry} for Dynatrace.
@@ -231,27 +231,67 @@ public class DynatraceMeterRegistry extends StepMeterRegistry {
 
     private void postCustomMetricValues(String type, List<DynatraceTimeSeries> timeSeries, String customDeviceMetricEndpoint) {
         try {
-            httpClient.post(customDeviceMetricEndpoint)
-                    .withJsonContent(createPostMessage(type, timeSeries))
-                    .send()
-                    .onSuccess(response -> logger.debug("successfully sent {} metrics to Dynatrace.", timeSeries.size()))
-                    .onError(response -> logger.error("failed to send metrics to dynatrace: {}", response.body()));
+            for (Tuple<String, Integer> postMessage : createPostMessages(type, timeSeries)) {
+                httpClient.post(customDeviceMetricEndpoint)
+                        .withJsonContent(postMessage.x)
+                        .send()
+                        .onSuccess(response -> logger.debug("successfully sent {} metrics to Dynatrace.", postMessage.y))
+                        .onError(response -> logger.error("failed to send metrics to dynatrace: {}", response.body()));
+            }
         } catch (Throwable e) {
             logger.error("failed to send metrics to dynatrace", e);
         }
     }
 
-    private String createPostMessage(String type, List<DynatraceTimeSeries> timeSeries) {
-        StringBuilder sb = new StringBuilder();
+    private List<Tuple<String, Integer>> createPostMessages(String type, List<DynatraceTimeSeries> timeSeries) {
+        final StringBuilder sb = new StringBuilder();
         sb.append("{\"type\":\"").append(type).append('\"')
-            .append(",\"series\":[")
-            .append(timeSeries.stream()
-                    .map(DynatraceTimeSeries::asJson)
-                    .collect(joining(",")))
-            .append("]}");
-        String message = sb.toString();
-        logger.debug("created post message:\n{}", message);
-        return message;
+                .append(",\"series\":[");
+        final String header = sb.toString();
+        final String footer = "]}";
+        long maxMessageSize = config.maxMessageSize() < 0 ? Long.MIN_VALUE :
+                config.maxMessageSize() - (header.length() + footer.length());
+        List<Tuple<String, Integer>> bodies = createPostMessageBodies(timeSeries, maxMessageSize);
+        return bodies.stream().map(t -> {
+            StringBuilder bsb = new StringBuilder();
+            bsb.append(header).append(t.x).append(footer);
+            String message = bsb.toString();
+            logger.debug("created post message:\n{}", message);
+            return new Tuple<String, Integer>(message, t.y);
+        }).collect(Collectors.toList());
+    }
+
+    private List<Tuple<String, Integer>> createPostMessageBodies(List<DynatraceTimeSeries> timeSeries, long maxSize) {
+        ArrayList<Tuple<String, Integer>> messages = new ArrayList<>();
+        StringBuilder sb = new StringBuilder();
+        int skippedMetrics = 0;
+        int count = 0;
+        for (DynatraceTimeSeries ts : timeSeries) {
+            boolean skip = false;
+            String json = ts.asJson();
+            if (maxSize > -1) {
+                if (json.length() > maxSize) {
+                    skip = true;
+                    skippedMetrics++;
+                } else if ((sb.length() + json.length()) > maxSize) {
+                    messages.add(new Tuple(sb.toString(), count));
+                    sb.setLength(0);
+                    count = 0;
+                }
+            }
+            if (!skip) {
+                if (sb.length() > 0) {
+                    sb.append(',');
+                }
+                sb.append(json);
+                count++;
+            }
+        }
+        messages.add(new Tuple(sb.toString(), count));
+        if (skippedMetrics > 0) {
+            logger.info("skipped {} timeSeries metrics because they were too large", skippedMetrics);
+        }
+        return messages;
     }
 
     private Meter.Id idWithSuffix(Meter.Id id, String suffix) {
