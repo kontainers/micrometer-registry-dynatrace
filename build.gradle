@@ -1,0 +1,114 @@
+buildscript {
+    repositories {
+        jcenter()
+    }
+    dependencies {
+        classpath 'com.bmuschko:gradle-nexus-plugin:2.3.1'
+    }
+}
+
+apply plugin: 'java'
+apply plugin: 'com.bmuschko.nexus'
+
+group = 'io.kontainers'
+version = '1.1.1'
+
+description = 'A forked version of io.micrometer:micrometer-registry-dynatrace with some fixes'
+
+repositories {
+    mavenCentral()
+}
+
+dependencies {
+    compile 'io.micrometer:micrometer-core:1.1.1'
+    compile 'org.slf4j:slf4j-api:1.7.25'
+    testCompile 'io.micrometer:micrometer-test:1.1.1'
+    testCompile 'org.slf4j:slf4j-simple:1.7.25'
+    testCompile 'org.assertj:assertj-core:3.11.1'
+
+    testImplementation(
+            'org.junit.jupiter:junit-jupiter-api:5.1.0'
+    )
+    testRuntimeOnly(
+            'org.junit.jupiter:junit-jupiter-engine:5.1.0'
+    )
+}
+
+test {
+    useJUnitPlatform()
+}
+
+modifyPom {
+    project {
+        name 'micrometer-registry-dynatrace'
+        description 'A forked version of io.micrometer:micrometer-registry-dynatrace with some fixes'
+        url 'https://github.com/kontainers/micrometer-registry-dynatrace'
+        inceptionYear '2018'
+
+        scm {
+            url 'https://github.com/kontainers/micrometer-registry-dynatrace'
+            connection 'scm:git://github.com/kontainers/micrometer-registry-dynatrace.git'
+            developerConnection 'scm:git://github.com/kontainers/micrometer-registry-dynatrace.git'
+        }
+
+        licenses {
+            license {
+                name 'The Apache Software License, Version 2.0'
+                url 'http://www.apache.org/licenses/LICENSE-2.0.txt'
+                distribution 'repo'
+            }
+        }
+
+        developers {
+            developer {
+                id 'pjfanning'
+                name 'PJ Fanning'
+            }
+        }
+    }
+}
+
+def customizePom(pom) {
+    pom.withXml {
+        def root = asNode()
+
+        // eliminate test-scoped dependencies (no need in maven central POMs)
+        root.dependencies.removeAll { dep ->
+            dep.scope == "test"
+        }
+
+        // add all items necessary for maven central publication
+        root.children().last() + {
+            resolveStrategy = Closure.DELEGATE_FIRST
+
+            description 'A forked version of io.micrometer:micrometer-registry-dynatrace with some fixes'
+            name 'micrometer-registry-dynatrace'
+            url 'https://github.com/kontainers/micrometer-registry-dynatrace'
+            organization {
+                name 'com.github.pjfanning'
+                url 'https://github.com/pjfanning'
+            }
+            issueManagement {
+                system 'GitHub'
+                url 'https://github.com/kontainers/micrometer-registry-dynatrace/issues'
+            }
+            licenses {
+                license {
+                    name 'The Apache License, Version 2.0'
+                    url 'http://www.apache.org/licenses/LICENSE-2.0.txt'
+                }
+            }
+            scm {
+                url 'https://github.com/kontainers/micrometer-registry-dynatrace'
+                connection 'scm:git:git://github.com/kontainers/micrometer-registry-dynatrace.git'
+                developerConnection 'scm:git:ssh://git@github.com:kontainers/micrometer-registry-dynatrace.git'
+            }
+            developers {
+                developer {
+                    id 'pjfanning'
+                    name 'PJ Fanning'
+                }
+            }
+        }
+    }
+}
