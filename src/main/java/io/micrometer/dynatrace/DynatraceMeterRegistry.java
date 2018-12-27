@@ -231,11 +231,11 @@ public class DynatraceMeterRegistry extends StepMeterRegistry {
 
     private void postCustomMetricValues(String type, List<DynatraceTimeSeries> timeSeries, String customDeviceMetricEndpoint) {
         try {
-            for (String postMessage : createPostMessages(type, timeSeries)) {
+            for (Tuple<String, Integer> postMessage : createPostMessages(type, timeSeries)) {
                 httpClient.post(customDeviceMetricEndpoint)
-                        .withJsonContent(postMessage)
+                        .withJsonContent(postMessage.x)
                         .send()
-                        .onSuccess(response -> logger.debug("successfully sent {} metrics to Dynatrace.", timeSeries.size()))
+                        .onSuccess(response -> logger.debug("successfully sent {} metrics to Dynatrace.", postMessage.y))
                         .onError(response -> logger.error("failed to send metrics to dynatrace: {}", response.body()));
             }
         } catch (Throwable e) {
@@ -243,7 +243,7 @@ public class DynatraceMeterRegistry extends StepMeterRegistry {
         }
     }
 
-    private List<String> createPostMessages(String type, List<DynatraceTimeSeries> timeSeries) {
+    private List<Tuple<String, Integer>> createPostMessages(String type, List<DynatraceTimeSeries> timeSeries) {
         final StringBuilder sb = new StringBuilder();
         sb.append("{\"type\":\"").append(type).append('\"')
                 .append(",\"series\":[");
@@ -251,20 +251,21 @@ public class DynatraceMeterRegistry extends StepMeterRegistry {
         final String footer = "]}";
         long maxMessageSize = config.maxMessageSize() < 0 ? Long.MIN_VALUE :
                 config.maxMessageSize() - (header.length() + footer.length());
-        List<String> bodies = createPostMessageBodies(timeSeries, maxMessageSize);
-        return bodies.stream().map(b -> {
+        List<Tuple<String, Integer>> bodies = createPostMessageBodies(timeSeries, maxMessageSize);
+        return bodies.stream().map(t -> {
             StringBuilder bsb = new StringBuilder();
-            bsb.append(header).append(b).append(footer);
+            bsb.append(header).append(t.x).append(footer);
             String message = bsb.toString();
             logger.debug("created post message:\n{}", message);
-            return message;
+            return new Tuple<String, Integer>(message, t.y);
         }).collect(Collectors.toList());
     }
 
-    private List<String> createPostMessageBodies(List<DynatraceTimeSeries> timeSeries, long maxSize) {
-        ArrayList<String> messages = new ArrayList<>();
+    private List<Tuple<String, Integer>> createPostMessageBodies(List<DynatraceTimeSeries> timeSeries, long maxSize) {
+        ArrayList<Tuple<String, Integer>> messages = new ArrayList<>();
         StringBuilder sb = new StringBuilder();
         int skippedMetrics = 0;
+        int count = 0;
         for (DynatraceTimeSeries ts : timeSeries) {
             boolean skip = false;
             String json = ts.asJson();
@@ -273,8 +274,9 @@ public class DynatraceMeterRegistry extends StepMeterRegistry {
                     skip = true;
                     skippedMetrics++;
                 } else if ((sb.length() + json.length()) > maxSize) {
-                    messages.add(sb.toString());
+                    messages.add(new Tuple(sb.toString(), count));
                     sb.setLength(0);
+                    count = 0;
                 }
             }
             if (!skip) {
@@ -282,9 +284,10 @@ public class DynatraceMeterRegistry extends StepMeterRegistry {
                     sb.append(',');
                 }
                 sb.append(json);
+                count++;
             }
         }
-        messages.add(sb.toString());
+        messages.add(new Tuple(sb.toString(), count));
         if (skippedMetrics > 0) {
             logger.info("skipped {} timeSeries metrics because they were too large", skippedMetrics);
         }
