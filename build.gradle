@@ -61,6 +61,11 @@ modifyPom {
 
         developers {
             developer {
+                id 'jkschneider'
+                name 'Jon Schneider'
+                email 'jschneider@pivotal.io'
+            }
+            developer {
                 id 'pjfanning'
                 name 'PJ Fanning'
             }
@@ -85,8 +90,8 @@ def customizePom(pom) {
             name 'micrometer-registry-dynatrace'
             url 'https://github.com/kontainers/micrometer-registry-dynatrace'
             organization {
-                name 'com.github.pjfanning'
-                url 'https://github.com/pjfanning'
+                name 'io.kontainers'
+                url 'https://github.com/kontainers'
             }
             issueManagement {
                 system 'GitHub'
@@ -104,6 +109,11 @@ def customizePom(pom) {
                 developerConnection 'scm:git:ssh://git@github.com:kontainers/micrometer-registry-dynatrace.git'
             }
             developers {
+                developer {
+                    id 'jkschneider'
+                    name 'Jon Schneider'
+                    email 'jschneider@pivotal.io'
+                }
                 developer {
                     id 'pjfanning'
                     name 'PJ Fanning'
