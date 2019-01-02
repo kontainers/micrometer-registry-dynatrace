@@ -38,8 +38,12 @@ class DynatraceTimeSeries {
         return metricId;
     }
 
+    double getValue() {
+        return value;
+    }
+
     String asJson() {
-        StringBuilder sb = new StringBuilder();
+        StringBuilder sb = new StringBuilder(128);
         sb.append("{\"timeseriesId\":\"")
             .append(metricId)
             .append('\"')

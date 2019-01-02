@@ -246,7 +246,7 @@ public class DynatraceMeterRegistry extends StepMeterRegistry {
     }
 
     private List<Tuple<String, Integer>> createPostMessages(String type, List<DynatraceTimeSeries> timeSeries) {
-        final StringBuilder sb = new StringBuilder();
+        final StringBuilder sb = new StringBuilder(1024);
         sb.append("{\"type\":\"").append(type).append('\"')
                 .append(",\"series\":[");
         final String header = sb.toString();
@@ -271,27 +271,31 @@ public class DynatraceMeterRegistry extends StepMeterRegistry {
         int metricCount = 0;
         long totalByteCount = 0;
         for (DynatraceTimeSeries ts : timeSeries) {
-            boolean skip = false;
-            String json = ts.asJson();
-            int jsonByteCount = json.getBytes(UTF_8).length;
-            if (maxSize > -1) {
-                if (json.length() > maxSize) {
-                    skip = true;
-                    skippedMetrics++;
-                } else if ((totalByteCount + jsonByteCount) > maxSize) {
-                    messages.add(new Tuple<>(sb.toString(), metricCount));
-                    sb.setLength(0);
-                    totalByteCount = 0;
-                    metricCount = 0;
+            if (ts.getValue() == Double.NaN) {
+                logger.debug("skipping metric {} because its value is NaN", ts.getMetricId());
+            } else {
+                boolean skip = false;
+                String json = ts.asJson();
+                int jsonByteCount = json.getBytes(UTF_8).length;
+                if (maxSize > -1) {
+                    if (json.length() > maxSize) {
+                        skip = true;
+                        skippedMetrics++;
+                    } else if ((totalByteCount + jsonByteCount) > maxSize) {
+                        messages.add(new Tuple<>(sb.toString(), metricCount));
+                        sb.setLength(0);
+                        totalByteCount = 0;
+                        metricCount = 0;
+                    }
                 }
-            }
-            if (!skip) {
-                if (sb.length() > 0) {
-                    sb.append(',');
+                if (!skip) {
+                    if (sb.length() > 0) {
+                        sb.append(',');
+                    }
+                    sb.append(json);
+                    totalByteCount += jsonByteCount;
+                    metricCount++;
                 }
-                sb.append(json);
-                totalByteCount += jsonByteCount;
-                metricCount++;
             }
         }
         messages.add(new Tuple<>(sb.toString(), metricCount));
