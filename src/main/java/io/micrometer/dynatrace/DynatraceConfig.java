@@ -62,7 +62,7 @@ public interface DynatraceConfig extends StepRegistryConfig {
 
     /**
      * The maximum size of message to send when sending messages to Dynatrace
-     * @return maxMessageSize in characters; -1 indicates unlimited message size
+     * @return maxMessageSize in bytes; -1 indicates unlimited message size
      */
     default long maxMessageSize() {
         String v = get(prefix() + ".maxMessageSize");

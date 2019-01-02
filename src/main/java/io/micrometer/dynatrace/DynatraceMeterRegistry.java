@@ -39,6 +39,7 @@ import java.util.stream.Stream;
 import java.util.stream.StreamSupport;
 
 import static io.micrometer.dynatrace.DynatraceMetricDefinition.DynatraceUnit;
+import static java.nio.charset.StandardCharsets.UTF_8;
 import static java.util.Objects.requireNonNull;
 
 /**
@@ -249,15 +250,16 @@ public class DynatraceMeterRegistry extends StepMeterRegistry {
                 .append(",\"series\":[");
         final String header = sb.toString();
         final String footer = "]}";
-        long maxMessageSize = config.maxMessageSize() < 0 ? Long.MIN_VALUE :
-                config.maxMessageSize() - (header.length() + footer.length());
+        final long headerFooterBytes = header.getBytes(UTF_8).length + footer.getBytes(UTF_8).length;
+        final long maxMessageSize = config.maxMessageSize() < 0 ? Long.MIN_VALUE :
+                config.maxMessageSize() - headerFooterBytes;
         List<Tuple<String, Integer>> bodies = createPostMessageBodies(timeSeries, maxMessageSize);
         return bodies.stream().map(t -> {
             StringBuilder bsb = new StringBuilder();
             bsb.append(header).append(t.x).append(footer);
             String message = bsb.toString();
             logger.debug("created post message:\n{}", message);
-            return new Tuple<String, Integer>(message, t.y);
+            return new Tuple<>(message, t.y);
         }).collect(Collectors.toList());
     }
 
@@ -265,18 +267,21 @@ public class DynatraceMeterRegistry extends StepMeterRegistry {
         ArrayList<Tuple<String, Integer>> messages = new ArrayList<>();
         StringBuilder sb = new StringBuilder();
         int skippedMetrics = 0;
-        int count = 0;
+        int metricCount = 0;
+        long totalByteCount = 0;
         for (DynatraceTimeSeries ts : timeSeries) {
             boolean skip = false;
             String json = ts.asJson();
+            int jsonByteCount = json.getBytes(UTF_8).length;
             if (maxSize > -1) {
                 if (json.length() > maxSize) {
                     skip = true;
                     skippedMetrics++;
-                } else if ((sb.length() + json.length()) > maxSize) {
-                    messages.add(new Tuple(sb.toString(), count));
+                } else if ((totalByteCount + jsonByteCount) > maxSize) {
+                    messages.add(new Tuple<>(sb.toString(), metricCount));
                     sb.setLength(0);
-                    count = 0;
+                    totalByteCount = 0;
+                    metricCount = 0;
                 }
             }
             if (!skip) {
@@ -284,10 +289,11 @@ public class DynatraceMeterRegistry extends StepMeterRegistry {
                     sb.append(',');
                 }
                 sb.append(json);
-                count++;
+                totalByteCount += jsonByteCount;
+                metricCount++;
             }
         }
-        messages.add(new Tuple(sb.toString(), count));
+        messages.add(new Tuple<>(sb.toString(), metricCount));
         if (skippedMetrics > 0) {
             logger.info("skipped {} timeSeries metrics because they were too large", skippedMetrics);
         }
