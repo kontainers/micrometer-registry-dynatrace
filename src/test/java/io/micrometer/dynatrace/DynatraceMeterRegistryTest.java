@@ -15,13 +15,22 @@
  */
 package io.micrometer.dynatrace;
 
+import com.fasterxml.jackson.databind.ObjectMapper;
 import io.micrometer.core.instrument.Clock;
+import io.micrometer.core.instrument.Gauge;
+import io.micrometer.core.instrument.Tags;
+import io.micrometer.core.instrument.TimeGauge;
 import io.micrometer.core.instrument.config.MissingRequiredConfigurationException;
 import io.micrometer.core.ipc.http.HttpSender;
 import org.junit.jupiter.api.Test;
 
 import java.lang.reflect.Field;
+import java.util.List;
 import java.util.Set;
+import java.util.concurrent.TimeUnit;
+import java.util.concurrent.atomic.AtomicReference;
+import java.util.stream.Collectors;
+import java.util.stream.Stream;
 
 import static org.assertj.core.api.Assertions.assertThat;
 import static org.assertj.core.api.Assertions.assertThatThrownBy;
@@ -32,6 +41,8 @@ import static org.assertj.core.api.Assertions.assertThatThrownBy;
  * @author Johnny Lim
  */
 class DynatraceMeterRegistryTest {
+
+    private final DynatraceMeterRegistry meterRegistry = createMeterRegistry();
 
     @Test
     void constructorWhenUriIsMissingShouldThrowMissingRequiredConfigurationException() {
@@ -101,6 +112,86 @@ class DynatraceMeterRegistryTest {
 
     @Test
     void putCustomMetricOnSuccessShouldAddMetricIdToCreatedCustomMetrics() throws NoSuchFieldException, IllegalAccessException {
+        Field createdCustomMetricsField = DynatraceMeterRegistry.class.getDeclaredField("createdCustomMetrics");
+        createdCustomMetricsField.setAccessible(true);
+        @SuppressWarnings("unchecked")
+        Set<String> createdCustomMetrics = (Set<String>) createdCustomMetricsField.get(meterRegistry);
+        assertThat(createdCustomMetrics).isEmpty();
+
+        DynatraceMetricDefinition customMetric = new DynatraceMetricDefinition("metricId", null, null, null, new String[]{"type"});
+        meterRegistry.putCustomMetric(customMetric);
+        assertThat(createdCustomMetrics).containsExactly("metricId");
+    }
+
+    @Test
+    void writeMeterWithGauge() {
+        meterRegistry.gauge("my.gauge", 1d);
+        Gauge gauge = meterRegistry.find("my.gauge").gauge();
+        assertThat(meterRegistry.writeMeter(gauge)).hasSize(1);
+    }
+
+    @Test
+    void writeMeterWithGaugeShouldDropNanValue() {
+        meterRegistry.gauge("my.gauge", Double.NaN);
+        Gauge gauge = meterRegistry.find("my.gauge").gauge();
+        assertThat(meterRegistry.writeMeter(gauge)).isEmpty();
+    }
+
+    @Test
+    void writeMeterWithGaugeShouldDropInfiniteValues() {
+        meterRegistry.gauge("my.gauge", Double.POSITIVE_INFINITY);
+        Gauge gauge = meterRegistry.find("my.gauge").gauge();
+        assertThat(meterRegistry.writeMeter(gauge)).isEmpty();
+
+        meterRegistry.gauge("my.gauge", Double.NEGATIVE_INFINITY);
+        gauge = meterRegistry.find("my.gauge").gauge();
+        assertThat(meterRegistry.writeMeter(gauge)).isEmpty();
+    }
+
+    @Test
+    void writeMeterWithTimeGauge() {
+        AtomicReference<Double> obj = new AtomicReference<>(1d);
+        meterRegistry.more().timeGauge("my.timeGauge", Tags.empty(), obj, TimeUnit.SECONDS, AtomicReference::get);
+        TimeGauge timeGauge = meterRegistry.find("my.timeGauge").timeGauge();
+        assertThat(meterRegistry.writeMeter(timeGauge)).hasSize(1);
+    }
+
+    @Test
+    void writeMeterWithTimeGaugeShouldDropNanValue() {
+        AtomicReference<Double> obj = new AtomicReference<>(Double.NaN);
+        meterRegistry.more().timeGauge("my.timeGauge", Tags.empty(), obj, TimeUnit.SECONDS, AtomicReference::get);
+        TimeGauge timeGauge = meterRegistry.find("my.timeGauge").timeGauge();
+        assertThat(meterRegistry.writeMeter(timeGauge)).isEmpty();
+    }
+
+    @Test
+    void writeMeterWithTimeGaugeShouldDropInfiniteValues() {
+        AtomicReference<Double> obj = new AtomicReference<>(Double.POSITIVE_INFINITY);
+        meterRegistry.more().timeGauge("my.timeGauge", Tags.empty(), obj, TimeUnit.SECONDS, AtomicReference::get);
+        TimeGauge timeGauge = meterRegistry.find("my.timeGauge").timeGauge();
+        assertThat(meterRegistry.writeMeter(timeGauge)).isEmpty();
+
+        obj = new AtomicReference<>(Double.NEGATIVE_INFINITY);
+        meterRegistry.more().timeGauge("my.timeGauge", Tags.empty(), obj, TimeUnit.SECONDS, AtomicReference::get);
+        timeGauge = meterRegistry.find("my.timeGauge").timeGauge();
+        assertThat(meterRegistry.writeMeter(timeGauge)).isEmpty();
+    }
+
+    @Test
+    void writeCustomMetrics() {
+        meterRegistry.gauge("my.gauge", 1d);
+        Gauge gauge = meterRegistry.find("my.gauge").gauge();
+        Stream<DynatraceMeterRegistry.DynatraceCustomMetric> series = meterRegistry.writeMeter(gauge);
+        List<DynatraceTimeSeries> timeSeries = series
+                .map(DynatraceMeterRegistry.DynatraceCustomMetric::getTimeSeries)
+                .collect(Collectors.toList());
+        List<Tuple<String, Integer>> entries = meterRegistry.createPostMessages("my.type", timeSeries);
+        assertThat(entries).hasSize(1);
+        assertThat(entries.get(0).y).isEqualTo(1);
+        assertThat(isJSONValid(entries.get(0).x)).isEqualTo(true);
+    }
+
+    private DynatraceMeterRegistry createMeterRegistry() {
         DynatraceConfig config = new DynatraceConfig() {
             @Override
             public String get(String key) {
@@ -122,18 +213,19 @@ class DynatraceMeterRegistryTest {
                 return "apiToken";
             }
         };
-        DynatraceMeterRegistry registry = DynatraceMeterRegistry.builder(config)
+        return DynatraceMeterRegistry.builder(config)
                 .httpClient(request -> new HttpSender.Response(200, null))
                 .build();
+    }
 
-        Field createdCustomMetricsField = DynatraceMeterRegistry.class.getDeclaredField("createdCustomMetrics");
-        createdCustomMetricsField.setAccessible(true);
-        @SuppressWarnings("unchecked") Set<String> createdCustomMetrics = (Set<String>) createdCustomMetricsField.get(registry);
-        assertThat(createdCustomMetrics).isEmpty();
-
-        DynatraceMetricDefinition customMetric = new DynatraceMetricDefinition("metricId", null, null, null, new String[]{"type"});
-        registry.putCustomMetric(customMetric);
-        assertThat(createdCustomMetrics).containsExactly("metricId");
+    private static boolean isJSONValid(String jsonInString ) {
+        try {
+            final ObjectMapper mapper = new ObjectMapper();
+            mapper.readTree(jsonInString);
+            return true;
+        } catch (Exception e) {
+            return false;
+        }
     }
 
 }
