@@ -271,7 +271,7 @@ public class DynatraceMeterRegistry extends StepMeterRegistry {
         int metricCount = 0;
         long totalByteCount = 0;
         for (DynatraceTimeSeries ts : timeSeries) {
-            if (Double.isNaN(ts.getValue()) || Double.isInfinite(ts.getValue())) {
+            if (!Double.isFinite(ts.getValue())) {
                 logger.debug("skipping metric {} because its value is NaN or infinite", ts.getMetricId());
             } else {
                 boolean skip = false;
