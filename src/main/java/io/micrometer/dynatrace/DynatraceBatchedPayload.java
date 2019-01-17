@@ -1,5 +1,5 @@
 /**
- * Copyright 2017 Pivotal Software, Inc.
+ * Copyright 2019 Pivotal Software, Inc.
  * <p>
  * Licensed under the Apache License, Version 2.0 (the "License");
  * you may not use this file except in compliance with the License.
@@ -15,11 +15,11 @@
  */
 package io.micrometer.dynatrace;
 
-class Tuple<X, Y> {
-    public final X x;
-    public final Y y;
-    public Tuple(X x, Y y) {
-        this.x = x;
-        this.y = y;
+class DynatraceBatchedPayload {
+    public final String payload;
+    public final int metricCount;
+    public DynatraceBatchedPayload(String payload, int metricCount) {
+        this.payload = payload;
+        this.metricCount = metricCount;
     }
 }

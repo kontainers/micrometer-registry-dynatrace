@@ -234,12 +234,12 @@ public class DynatraceMeterRegistry extends StepMeterRegistry {
 
     private void postCustomMetricValues(String type, List<DynatraceTimeSeries> timeSeries, String customDeviceMetricEndpoint) {
         try {
-            for (Tuple<String, Integer> postMessage : createPostMessages(type, timeSeries)) {
+            for (DynatraceBatchedPayload postMessage : createPostMessages(type, timeSeries)) {
                 httpClient.post(customDeviceMetricEndpoint)
-                        .withJsonContent(postMessage.x)
+                        .withJsonContent(postMessage.payload)
                         .send()
                         .onSuccess(response -> logger.debug("successfully sent {} metrics to Dynatrace ({} bytes).",
-                                postMessage.y, postMessage.x.getBytes(UTF_8).length))
+                                postMessage.metricCount, postMessage.payload.getBytes(UTF_8).length))
                         .onError(response -> logger.error("failed to send metrics to dynatrace: {}", response.body()));
             }
         } catch (Throwable e) {
@@ -248,7 +248,7 @@ public class DynatraceMeterRegistry extends StepMeterRegistry {
     }
 
     // VisibleForTesting
-    List<Tuple<String, Integer>> createPostMessages(String type, List<DynatraceTimeSeries> timeSeries) {
+    List<DynatraceBatchedPayload> createPostMessages(String type, List<DynatraceTimeSeries> timeSeries) {
         final StringBuilder sb = new StringBuilder(1024);
         sb.append("{\"type\":\"").append(type).append('\"')
                 .append(",\"series\":[");
@@ -257,19 +257,19 @@ public class DynatraceMeterRegistry extends StepMeterRegistry {
         final long headerFooterBytes = header.getBytes(UTF_8).length + footer.getBytes(UTF_8).length;
         final long maxMessageSize = config.maxMessageSize() < 0 ? Long.MIN_VALUE :
                 config.maxMessageSize() - headerFooterBytes;
-        List<Tuple<String, Integer>> bodies = createPostMessageBodies(timeSeries, maxMessageSize);
+        List<DynatraceBatchedPayload> bodies = createPostMessageBodies(timeSeries, maxMessageSize);
         return bodies.stream().map(t -> {
             StringBuilder bsb = new StringBuilder();
-            bsb.append(header).append(t.x).append(footer);
+            bsb.append(header).append(t.payload).append(footer);
             String message = bsb.toString();
             logger.debug("created post message:\n{}", message);
-            return new Tuple<>(message, t.y);
+            return new DynatraceBatchedPayload(message, t.metricCount);
         }).collect(Collectors.toList());
     }
 
-    private List<Tuple<String, Integer>> createPostMessageBodies(List<DynatraceTimeSeries> timeSeries, long maxSize) {
-        ArrayList<Tuple<String, Integer>> messages = new ArrayList<>();
-        StringBuilder sb = new StringBuilder();
+    private List<DynatraceBatchedPayload> createPostMessageBodies(List<DynatraceTimeSeries> timeSeries, long maxSize) {
+        ArrayList<DynatraceBatchedPayload> messages = new ArrayList<>();
+        StringBuilder sb = new StringBuilder(1024);
         int skippedMetrics = 0;
         int metricCount = 0;
         long totalByteCount = 0;
@@ -282,7 +282,7 @@ public class DynatraceMeterRegistry extends StepMeterRegistry {
                     skip = true;
                     skippedMetrics++;
                 } else if ((totalByteCount + jsonByteCount) > maxSize) {
-                    messages.add(new Tuple<>(sb.toString(), metricCount));
+                    messages.add(new DynatraceBatchedPayload(sb.toString(), metricCount));
                     sb.setLength(0);
                     totalByteCount = 0;
                     metricCount = 0;
@@ -291,13 +291,14 @@ public class DynatraceMeterRegistry extends StepMeterRegistry {
             if (!skip) {
                 if (sb.length() > 0) {
                     sb.append(',');
+                    totalByteCount++;
                 }
                 sb.append(json);
                 totalByteCount += jsonByteCount;
                 metricCount++;
             }
         }
-        messages.add(new Tuple<>(sb.toString(), metricCount));
+        messages.add(new DynatraceBatchedPayload(sb.toString(), metricCount));
         if (skippedMetrics > 0) {
             logger.info("skipped {} timeSeries metrics because they were too large", skippedMetrics);
         }

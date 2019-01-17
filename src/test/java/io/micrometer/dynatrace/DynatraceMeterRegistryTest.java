@@ -185,10 +185,10 @@ class DynatraceMeterRegistryTest {
         List<DynatraceTimeSeries> timeSeries = series
                 .map(DynatraceMeterRegistry.DynatraceCustomMetric::getTimeSeries)
                 .collect(Collectors.toList());
-        List<Tuple<String, Integer>> entries = meterRegistry.createPostMessages("my.type", timeSeries);
+        List<DynatraceBatchedPayload> entries = meterRegistry.createPostMessages("my.type", timeSeries);
         assertThat(entries).hasSize(1);
-        assertThat(entries.get(0).y).isEqualTo(1);
-        assertThat(isJSONValid(entries.get(0).x)).isEqualTo(true);
+        assertThat(entries.get(0).metricCount).isEqualTo(1);
+        assertThat(isJSONValid(entries.get(0).payload)).isEqualTo(true);
     }
 
     private DynatraceMeterRegistry createMeterRegistry() {
